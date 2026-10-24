@@ -2,7 +2,7 @@
 
 An interactive aerial dune simulation with wind controls, a continuous desert view, and a separate diagram showing how grains move over a dune.
 
-[Open the public simulation](https://p-bell22.github.io/a-sea-of-sand/)
+[Open the public simulation](https://oddlymethodical.github.io/a-sea-of-sand/)
 
 ## Run the simulation
 
