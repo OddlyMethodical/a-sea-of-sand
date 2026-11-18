@@ -10,9 +10,24 @@ uniform float maxHeight;
 uniform float altitude;
 uniform float yaw;
 uniform float overhead;
+float sandHeight(vec2 patch){
+ return dot(texture2D(sandMap,patch+.5).rg,vec2(255.,255./256.));
+}
 float heightAt(vec2 p){
- vec2 uv=fract(p/fieldSize+.5);
- return dot(texture2D(sandMap,uv).rg,vec2(255.,255./256.));
+ // The central patch is drawn at its measured coordinates. Smooth shears in
+ // the surrounding panorama keep the periodic grid from lining up in rows.
+ vec2 patch=p/fieldSize;
+ float distanceBlend=smoothstep(.45,1.6,max(abs(patch.x),abs(patch.y)));
+ patch.x+=distanceBlend*(.29*sin(1.51*patch.y)+.17*sin(2.07*patch.y+.71*patch.x));
+ patch.y+=distanceBlend*(.24*sin(1.83*patch.x)-.20*sin(.93*patch.y+.61*patch.x));
+ float primary=sandHeight(patch);
+ if(distanceBlend==0.)return primary;
+ // Two patch orientations give the horizon different neighbours in each copy.
+ vec2 shifted=mat2(1.23,.47,-.47,1.23)*patch+vec2(.34,-.16);
+ float region=.5+.5*sin(1.31*patch.x+.82*patch.y);
+ primary*=1.-.30*region*distanceBlend;
+ float secondary=sandHeight(shifted)*(.65+.30*region)*distanceBlend;
+ return max(primary,secondary);
 }
 float shadow(vec3 p,vec3 sun){
  float shade=1.,t=4.;

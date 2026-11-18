@@ -12,10 +12,19 @@ const SHADOW_SLOPE=Math.tan(15*Math.PI/180);
 const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));
 export const transportForcing=(strength:number)=>strength>.3?strength*(strength*strength-.09)/.91:0;
 export type FieldStats={volume:number;exported:number;initial:number;balanceError:number;maxHeight:number;bareFraction:number;cycles:number};
+// A release draws from a broad flank and concentrates that sand into a smaller
+// downwind deposit over several updates. Distances below are in grid cells.
+type Release = {
+ x:number; z:number; targetX:number; targetZ:number; radius:number;
+ widthRatio:number; erosionDepth:number; remaining:number;
+};
 export class SandField{
  readonly size:number;readonly cell:number;readonly height:Float64Array;
  private delta:Float64Array;private shelter:Float64Array;
  private neighbors:Uint32Array;
+ private releaseClock=0;
+ private releaseSeed=18271;
+ private releases:Release[]=[];
  readonly initialHeight:Float64Array;
  version=0;cycles=0;exported=0;initialVolume=0;
  constructor(size=GRID_SIZE,cell=CELL_SIZE,seed=true){
@@ -64,7 +73,7 @@ export class SandField{
  }
  volume(){let sum=0;for(const h of this.height)sum+=h;return sum*this.cell*this.cell;}
  stats():FieldStats{let maxHeight=0,bare=0;for(const h of this.height){maxHeight=Math.max(maxHeight,h);if(h<.1)bare++;}const volume=this.volume();return {volume,exported:this.exported,initial:this.initialVolume,balanceError:volume+this.exported-this.initialVolume,maxHeight,bareFraction:bare/this.height.length,cycles:this.cycles};}
- reset(){this.height.set(this.initialHeight);this.exported=0;this.cycles=0;this.version++;}
+ reset(){this.releaseClock=0;this.releaseSeed=18271;this.releases=[];this.height.set(this.initialHeight);this.exported=0;this.cycles=0;this.version++;}
  private sample(a:Float64Array,x:number,z:number){
   x=((x%this.size)+this.size)%this.size;z=((z%this.size)+this.size)%this.size;
   const ix=Math.floor(x),iz=Math.floor(z),fx=x-ix,fz=z-iz,n=this.size;
@@ -92,6 +101,62 @@ export class SandField{
   const leftAmount=amount*(1-fx),rightAmount=amount*fx,d=this.delta;
   d[row+ix]+=leftAmount*(1-fz);d[row+right]+=rightAmount*(1-fz);
   d[nextRow+ix]+=leftAmount*fz;d[nextRow+right]+=rightAmount*fz;
+ }
+ private releaseRandom(){
+  this.releaseSeed=(Math.imul(this.releaseSeed,1664525)+1013904223)>>>0;
+  return this.releaseSeed/4294967296;
+ }
+ private startRelease(dx:number,dz:number){
+  const n=this.size;
+  // Sample exposed, thick deposits in a local neighbourhood. Other dune sizes
+  // still migrate and merge through the ordinary transport calculation.
+  const originX=this.releaseRandom()*n,originZ=this.releaseRandom()*n;
+  let parent=-1,thickness=0;
+  for(let trial=0;trial<48;trial++){
+   const x=Math.floor(originX+(this.releaseRandom()-.5)*n*.4+n)%n;
+   const z=Math.floor(originZ+(this.releaseRandom()-.5)*n*.4+n)%n;
+   const i=z*n+x;
+   if(this.height[i]>thickness && this.shelter[i]<=this.height[i]+1){
+    parent=i;thickness=this.height[i];
+   }
+  }
+  if(thickness<40)return;
+  const x=parent%n,z=Math.floor(parent/n);
+  const length=Math.min(thickness/this.cell,n/15);
+  const side=this.releaseRandom()<.5?-1:1;
+  let targetX=x,targetZ=z,lowest=Infinity;
+  for(let trial=0;trial<5;trial++){
+   const along=length*(2.1+2.5*this.releaseRandom());
+   const across=side*length*(.7+1.5*this.releaseRandom());
+   const tx=x+dx*along+dz*across,tz=z+dz*along-dx*across;
+   const bed=this.sample(this.height,tx,tz);
+   if(bed<lowest){lowest=bed;targetX=tx;targetZ=tz;}
+  }
+  this.releases.push({x,z,targetX,targetZ,radius:length*(1.4+.6*this.releaseRandom()),
+   widthRatio:.46+.12*this.releaseRandom(),erosionDepth:thickness*(.085+.05*this.releaseRandom()),remaining:1});
+ }
+ private shedFlanks(forcing:number,dx:number,dz:number){
+  // A wind-driven clock keeps the transfer independent of playback frame rate.
+  this.releaseClock+=forcing;
+  while(this.releaseClock>=28){this.releaseClock-=28;this.startRelease(dx,dz);}
+  if(!this.releases.length)return;
+  const n=this.size,h=this.height;
+  this.delta.fill(0);
+  for(const event of this.releases){
+   const portion=Math.min(event.remaining,forcing/100);
+   event.remaining-=portion;
+   const extent=Math.ceil(event.radius);
+   for(let oz=-extent;oz<=extent;oz++)for(let ox=-extent;ox<=extent;ox++){
+    const taper=1-(ox*ox+oz*oz)/(event.radius*event.radius);
+    if(taper<=0)continue;
+    const i=((event.z+oz+n)%n)*n+(event.x+ox+n)%n;
+    const amount=Math.min(h[i],portion*event.erosionDepth*taper*taper);
+    h[i]-=amount;
+    this.deposit((event.targetX+ox*event.widthRatio+n)%n,(event.targetZ+oz*event.widthRatio+n)%n,amount);
+   }
+  }
+  for(let i=0;i<h.length;i++)h[i]+=this.delta[i];
+  this.releases=this.releases.filter(event=>event.remaining>0);
  }
  // Larger steps scale the transported sand and stable surface diffusion. They
  // approximate several nominal cycles; they are not repeated detailed solves.
@@ -123,6 +188,7 @@ export class SandField{
   for(let i=0;i<h.length;i++)h[i]+=this.delta[i];
   // Conservative slope-driven surface creep, followed by repose-limited slides.
   const base=Math.min(.018,.006*transport);
+  this.shedFlanks(transport*cycles,dx,dz);
   this.creep(cycles===1?base:(1-Math.pow(1-4*base,cycles))/4);
   this.relax(cycles===1?48:192);this.version++;
  }

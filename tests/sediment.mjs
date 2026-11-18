@@ -18,7 +18,11 @@ const initial=f.height.slice();
 for(const strength of [0,.3]){f.step(strength,60);assert.deepEqual(f.height,initial);}
 for(let i=0;i<120;i++)f.step(i%30<10?2:1,60+70*Math.sin(i*.04));
 console.log('Varying winds:',invariants(f,'varying winds'));
+const evolved=f.height.slice();
 f.reset();assert.deepEqual(f.height,initial);assert.equal(f.exported,0);assert.equal(f.cycles,0);
+
+for(let i=0;i<120;i++)f.step(i%30<10?2:1,60+70*Math.sin(i*.04));
+assert.deepEqual(f.height,evolved,'reset must reproduce the sand field including pending flank releases');
 
 function mound(H){
  const m=new SandField(96,3,false);

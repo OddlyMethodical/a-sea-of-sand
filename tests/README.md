@@ -9,3 +9,5 @@ CPU benchmark: `node --experimental-strip-types tests/performance.mjs`. Compare 
 
 
 Fast forward: `node --experimental-strip-types tests/fast-forward.mjs` checks actual terrain evolution, conservation, nonnegative heights and repose under steady, strong and changing winds. `tests/playback.mjs` verifies nominal model-time accounting, detailed low-speed steps, bounded batches, pause/reset and the separate grain clock. Above 20 cy/s, larger transport steps are an explicit approximation; fast-forward cycle counts represent integrated model time, not individually executed detailed solves.
+
+Run `node --experimental-strip-types tests/long-run.mjs` for the slower landscape regression. It replays strong automatically varying winds with a mean bearing of 340° through 33,528 model cycles. At four checkpoints it verifies the sand budget and counts summits at least 10 m high that are local maxima within 90 m and stand at least 8 m above a point on the surrounding ring. The minimum count is a regression guard for this seeded landscape.

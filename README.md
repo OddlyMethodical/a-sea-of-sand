@@ -15,7 +15,7 @@ Download [a-sea-of-sand.html](./a-sea-of-sand.html) and open it in a browser wit
 
 ## Model and limitations
 
-The terrain stores sand on a 256 × 256 grid with 6 m spacing. Wind transfers sand between cells, sheltered areas promote deposition, and gravity relaxes steep slopes toward a 32° repose criterion. Periodic boundaries conserve sand and let the simulated patch repeat into the distance.
+The terrain stores sand on a 256 × 256 grid with 6 m spacing. Wind transfers sand between cells, sheltered areas promote deposition, and gravity relaxes steep slopes toward a 32° repose criterion. Sand crossing a boundary returns on the opposite side. An empirical calving rule gradually transfers sand from large deposits to smaller ones downwind. The central patch is drawn at its simulated coordinates. The distant panorama combines shifted and rotated samples of that patch.
 
 At speeds up to 20 cy/s, the model uses detailed individual cycles. Higher settings use larger, approximate transport steps to fast-forward the landscape. They advance model time and move more sand per update, but do not reproduce every individual detailed cycle. Strong and changing winds use shorter steps. The simulation is a simplified bulk-sediment model, not a calibrated reconstruction of a real desert; model cycles are not calendar years. Fine surface ripples are smaller than the grid and are omitted.
 
@@ -47,6 +47,8 @@ node --experimental-strip-types tests/rendering.mjs
 See [tests/README.md](./tests/README.md) for validation scope and performance measurements.
 
 ## Background
+
+- [Worman et al. (2013), Modeling emergent large-scale structures of barchan dune fields](https://scholars.duke.edu/publication/971408)
 
 - [Werner (1995), Eolian dunes: Computer simulations and attractor interpretation](https://sseh.uchicago.edu/doc/Werner_1995.pdf)
 - [USGS: Dune types](https://pubs.usgs.gov/gip/deserts/dunes/)
