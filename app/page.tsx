@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { registerModelTools } from './model-tools';
 import { createTerrain, drawGrain } from './terrain';
+import { GRID_SIZE, GRID_SIZES, SAND_PERCENTAGES, FIELD_SIZE } from './sediment';
 import { makeState, advanceSimulation, resetSimulation, windAt, MAX_SIMULATION_SPEED, DETAILED_SPEED_LIMIT, type SimState } from './wind';
 
 const scalar=(v:number|readonly number[])=>Array.isArray(v)?v[0]:v as number;
@@ -16,6 +17,9 @@ export default function Home(){
  const [fieldStats,setFieldStats]=useState({maxHeight:0,bareFraction:0,exported:0,initial:1,volume:0,balanceError:0,cycles:0});
  const [actualRate,setActualRate]=useState(0);
  const [direction,setDirection]=useState(60);const [variableWind,setVariableWind]=useState(false);const [wind,setWind]=useState({direction:60,strength:1});
+ const [grid,setGrid]=useState(GRID_SIZE),[sand,setSand]=useState(100);
+ const speedEntry=useRef<HTMLInputElement>(null);
+ useEffect(()=>{if(speedEntry.current)speedEntry.current.value=String(speed);},[speed,view]);
  const drag=useRef<{x:number,yaw:number}|null>(null);
  useEffect(()=>{if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){state.current.playing=false;setPlaying(false);}return createTerrain(terrainRef.current!,state.current,setError);},[]);
  useEffect(()=>{
@@ -45,11 +49,15 @@ export default function Home(){
  },[]);
 
  function toggle(){state.current.playing=!state.current.playing;setPlaying(state.current.playing);}
- function reset(){resetSimulation(state.current);setCycles(0);setActualRate(0);setWind(windAt(state.current));if(state.current.model)setFieldStats(state.current.model.stats());}
+ function reset(resolution?:number,sandPercent?:number){resetSimulation(state.current,resolution,sandPercent);setCycles(0);setActualRate(0);setWind(windAt(state.current));if(state.current.model)setFieldStats(state.current.model.stats());}
  function changeView(v:unknown){const next=String(v);state.current.view=next;setView(next);}
- useEffect(()=>{const listener=(e:KeyboardEvent)=>{const el=e.target as HTMLElement;if(e.code==='Space'&&el.tagName!=='BUTTON'&&el.tagName!=='INPUT'&&el.getAttribute('role')!=='slider'&&!el.closest('[role="dialog"]')){e.preventDefault();toggle();}};window.addEventListener('keydown',listener);return()=>window.removeEventListener('keydown',listener);},[]);
+ useEffect(()=>{const listener=(e:KeyboardEvent)=>{const el=e.target as HTMLElement;if(e.code==='Space'&&el.tagName!=='BUTTON'&&el.tagName!=='INPUT'&&el.tagName!=='SELECT'&&el.getAttribute('role')!=='slider'&&!el.closest('[role="dialog"]')){e.preventDefault();toggle();}};window.addEventListener('keydown',listener);return()=>window.removeEventListener('keydown',listener);},[]);
  useEffect(()=>registerModelTools(()=>state.current,input=>{
-  if(input.reset)reset();
+  const model=state.current.model;
+  const size=input.resolution??model?.size??GRID_SIZE,amount=input.sandPercent??model?.sandPercent??100;
+  if(size!==(model?.size??GRID_SIZE)||amount!==(model?.sandPercent??100)){
+   reset(size,amount);setGrid(size);setSand(amount);
+  }else if(input.reset)reset();
   if(input.playing!==undefined){state.current.playing=input.playing;setPlaying(input.playing);}
   if(input.view!==undefined)changeView(input.view);
   if(input.speed!==undefined){state.current.speed=input.speed;setSpeed(input.speed);}
@@ -78,13 +86,23 @@ export default function Home(){
    {error&&view!=='grain'&&<div className="error-overlay"><p>{error}</p><button className="quiet-button" onClick={()=>changeView('grain')}>Explore Grain journey <ArrowRight/></button></div>}
    <div className="scene-bottom"><div><div className="time-label">{view==='grain'?'Grain transport':'Model time'}</div><div className="time-value">{view==='grain'?'Hop. Fall. Repeat.':Math.floor(cycles).toLocaleString('en-GB')}{view!=='grain'&&<span>cycles</span>}</div></div><div className="scene-hint">{view==='grain'?<>Section aligned with wind<br/>Separate clock · aerial time paused</>:<><span className="drag-hint">Drag to look around · ← → to turn<br/></span>{view==='above'?'Vertical observation':'Stationary aerial observation'}<br/>Dunes to the horizon</>}</div></div>
   </section>
-  <div className="transport" aria-label="Playback controls"><button className="play-button" onClick={toggle} aria-label={playing?'Pause simulation':'Play simulation'} title="Play / pause (Space)">{playing?<Pause size={18} fill="currentColor"/>:<Play size={18} fill="currentColor"/>}</button><button className="reset-button" aria-label="Reset elapsed time and camera" title="Restart" onClick={reset}><RotateCcw size={16}/></button><span className="clock-state">{playing?'Time flowing':'Time paused'}</span><div className="speed-control"><label id="speed-label">Speed</label><Slider aria-labelledby="speed-label" min={1} max={MAX_SIMULATION_SPEED} step={1} value={[speed]} onValueChange={v=>{const n=scalar(v);setSpeed(n);state.current.speed=n;}}/><output title="Target model cycles per second. Above 20 cy/s, larger approximate transport steps fast-forward the landscape.">{view==='grain'?`${(speed/5).toFixed(1)}×`:`${speed} cy/s`}{view!=='grain'&&<small className="actual-rate">Actual {playing?Math.round(actualRate):0} cy/s{speed>DETAILED_SPEED_LIMIT&&<span className="fast-forward-note">Fast forward · approximate</span>}</small>}</output></div><p className="transport-note">{view==='grain'?'See how sand carries the dune forward.':<><span>Sand is conserved.</span> Wind and gravity reshape the dunes.</>}</p></div>
+  <div className="transport" aria-label="Playback controls"><button className="play-button" onClick={toggle} aria-label={playing?'Pause simulation':'Play simulation'} title="Play / pause (Space)">{playing?<Pause size={18} fill="currentColor"/>:<Play size={18} fill="currentColor"/>}</button><button className="reset-button" aria-label="Reset elapsed time and camera" title="Restart" onClick={()=>reset()}><RotateCcw size={16}/></button><span className="clock-state">{playing?'Time flowing':'Time paused'}</span><div className="speed-control"><label id="speed-label">Speed</label><Slider aria-labelledby="speed-label" min={1} max={MAX_SIMULATION_SPEED} step={1} value={[speed]} onValueChange={v=>{const n=scalar(v);setSpeed(n);state.current.speed=n;}}/><div className="speed-reading">{view==='grain'?`${(speed/5).toFixed(1)}×`:<label className="target-speed"><input type="number" aria-label="Target cycles per second" ref={speedEntry} defaultValue={speed} min={1} max={MAX_SIMULATION_SPEED} step={1} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}} onBlur={e=>{
+    const input=e.currentTarget;
+    const next=Number.isFinite(input.valueAsNumber)?Math.min(MAX_SIMULATION_SPEED,Math.max(1,Math.round(input.valueAsNumber))):state.current.speed;
+    input.value=String(next);setSpeed(next);state.current.speed=next;
+   }}/> cy/s</label>}{view!=='grain'&&<small className="actual-rate">Actual {playing?Math.round(actualRate):0} cy/s{speed>DETAILED_SPEED_LIMIT&&<span className="fast-forward-note">Fast forward · approximate</span>}</small>}</div></div><p className="transport-note">{view==='grain'?'See how sand carries the dune forward.':<><span>Sand is conserved.</span> Wind and gravity reshape the dunes.</>}</p></div>
+  {view!=='grain'&&<form className="field-settings" aria-label="Starting terrain" onSubmit={e=>{e.preventDefault();reset(grid,sand);}}>
+   <div><label htmlFor="terrain-grid">Terrain resolution</label><select id="terrain-grid" value={grid} onChange={e=>setGrid(Number(e.target.value))}>{GRID_SIZES.map(size=><option key={size} value={size}>{size===128?'Coarse':size===256?'Standard':'Fine'} · {FIELD_SIZE/size} m cells</option>)}</select></div>
+   <div><label htmlFor="starting-sand">Starting sand</label><select id="starting-sand" value={sand} onChange={e=>setSand(Number(e.target.value))}>{SAND_PERCENTAGES.map(amount=><option key={amount} value={amount}>{amount}%</option>)}</select></div>
+   <button className="field-apply" type="submit" disabled={grid===(state.current.model?.size??GRID_SIZE)&&sand===(state.current.model?.sandPercent??100)}>Restart with settings</button>
+   <p>{grid} × {grid} cells over the same 1.54 km patch. Finer grids resolve smaller features and run more slowly.</p>
+  </form>}
   <footer className="bottom-caption"><p><em>Sand moves. The shape travels.</em><span>A travelling wave made of grains.</span></p><button className="caption-link" onClick={()=>setInfo(true)}>Why dunes move <ArrowRight size={16}/></button></footer>
   <Sheet open={info} onOpenChange={setInfo}><SheetContent className="info-sheet"><span className="eyebrow">Field notes / Transport model</span><SheetTitle>Sand moves.<br/>The landscape changes.</SheetTitle><SheetDescription>A reduced physical model within a continuous desert view.</SheetDescription>
    <h3>What is actually simulated?</h3><p>The landscape is a grid of stored sand thickness. Exposed cells lose sand to the wind; that same sand is carried downwind and deposited. Sheltered lee areas trap more sand. Gravity transfers sand down slopes that exceed a 32° repose criterion. The simulated patch has periodic boundaries: sand leaving one edge enters the opposite edge, conserving the total amount.</p>
    <h3>Why do the dunes continue to the horizon?</h3><p>The model covers a 1.54 km patch. Near the centre you see the simulated surface at its measured coordinates. Farther out, the panorama combines shifted, rotated samples of that same surface. This gives distant dunes different neighbours and spacing.</p>
    <h3>Where do new small dunes come from?</h3><p>Some crescent dunes shed smaller dunes from their flanks. Here, sustained transport can gradually move sand from a thick deposit into a smaller one downwind. Both deposits then evolve under the wind. The transfer conserves sand. Its timing, size and location are simplified model choices.</p>
-   <h3>Smooth faces or thousands of ripples?</h3><p>Both occur. Fine wind ripples can cover the exposed side, while avalanche faces can appear much smoother. Ordinary ripples are far smaller than dunes. The grid spacing here is 6 m, so centimetre-scale ripples cannot be resolved and are not painted onto the aerial view. The smaller bumps you saw before were artificially superimposed dune waves; those have been removed.</p>
+   <h3>Smooth faces or thousands of ripples?</h3><p>Both occur. Fine wind ripples can cover the exposed side, while avalanche faces can appear much smoother. Ordinary ripples are far smaller than dunes. At the current grid spacing of {state.current.model?.cell??FIELD_SIZE/GRID_SIZE} m, centimetre-scale ripples are too small to see. A finer grid samples the same dunes at more points. Starting sand changes the volume of sand available to move.</p>
    <h3>Wind changes the transport.</h3><p>Direction steers where eroded sand is deposited. Strength has a transport threshold and a nonlinear response. Automatic variation changes both. Dunes reshape through redistribution of sand; the terrain is never rotated or translated to fake a wind response.</p>
    <h3>What the clock means.</h3><p>A cycle is a nominal unit of bulk sand-transport time, not a year. Up to 20 cy/s, the model calculates each cycle in detail. Above that, fast forward moves more sand per update using larger, approximate time steps. The counter advances by the model time actually integrated; it does not claim that every detailed cycle was calculated separately. Actual cy/s shows the achieved rate.</p>
    <h3>What changes in fast forward?</h3><p>Wind moves a larger amount of sand before the surface is recalculated. Sand conservation and slope relaxation still apply, but individual erosion and deposition events are less finely resolved. Strong or changing winds use shorter steps. Fast forward is useful for exploring landscape evolution; its trajectory differs from detailed stepping. The shape and drawing detail are unchanged when you return to low speeds, but only Restart returns to the original landscape.</p>

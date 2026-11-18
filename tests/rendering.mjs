@@ -12,10 +12,10 @@ globalThis.cancelAnimationFrame=id=>raf.delete(id);
 globalThis.document={hidden:false};
 globalThis.window={devicePixelRatio:1,addEventListener:(name,fn)=>events.set(name,fn),removeEventListener:name=>events.delete(name)};
 globalThis.ResizeObserver=class{constructor(fn){resizeObserver=fn;}observe(){}disconnect(){}};
-const gl=new Proxy({getShaderParameter:()=>true,getProgramParameter:()=>true,getAttribLocation:()=>0,drawArrays(){draws++;},texImage2D(){allocations++;},texSubImage2D(){uploads++;}}, {get:(target,key)=>key in target?target[key]:()=>({})});
+const gl=new Proxy({getShaderParameter:()=>true,getProgramParameter:()=>true,getAttribLocation:()=>0,drawArrays(){draws++;},texImage2D(target,level,format,width,height,border,format2,type,data){assert.equal(data.length,width*height*4);assert.equal(width,state.model.size);allocations++;},texSubImage2D(){uploads++;}}, {get:(target,key)=>key in target?target[key]:()=>({})});
 let width=1200,height=760;
 const canvas={width:0,height:0,getContext:()=>gl,getBoundingClientRect:()=>({width,height}),addEventListener:(key,fn)=>canvasEvents.set(key,fn),removeEventListener:key=>canvasEvents.delete(key)};
-const model={version:0,pack(){},stats:()=>({maxHeight:70})};
+const model={version:0,size:256,cell:6,pack(){},stats:()=>({maxHeight:70})};
 const state={model,altitude:260,yaw:0,view:'aerial'};
 const cleanup=createTerrain(canvas,state,e=>{throw new Error(e);});
 function frame(){now+=1000/60;const callbacks=[...raf.values()];raf.clear();for(const fn of callbacks){callbackCount++;fn(now);}}
@@ -30,6 +30,10 @@ state.altitude=600;state.view='above';before=draws;for(let i=0;i<300;i++)frame()
 width=800;resizeObserver();frame();assert.equal(draws,before+1,'resize redraws');assert.equal(canvas.width,720);assert.equal(canvas.height,684,'resolution remains 0.9x original CSS dimensions');
 state.model.version++;document.hidden=true;before=draws;for(let i=0;i<60;i++)frame();assert.equal(draws,before);document.hidden=false;frame();assert.equal(draws,before+1,'hidden changes render on return');
 state.view='grain';before=draws;state.model.version++;for(let i=0;i<60;i++)frame();assert.equal(draws,before,'grain view does not render hidden terrain');state.view='aerial';frame();assert.ok(draws>before);
+for(let i=0;i<300;i++)frame();
+state.model={...model,size:512,cell:3};before=draws;frame();assert.equal(draws,before+1);assert.equal(allocations,2,'new grid gets a correctly sized texture');
+state.model={...state.model};frame();assert.equal(draws,before+2);assert.equal(allocations,2,'same-size replacement reuses texture but uploads new sand');
+frame();assert.equal(draws,before+2);
 cleanup();assert.equal(raf.size,0);assert.equal(events.size,0);assert.equal(canvasEvents.size,0);
 let grainClears=0,grainWidth=800;
 const context2D=new Proxy({clearRect(){grainClears++;},createLinearGradient:()=>({addColorStop(){}})},{get:(target,key)=>key in target?target[key]:()=>{}});

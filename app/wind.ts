@@ -1,7 +1,13 @@
-import { SandField, transportForcing } from './sediment';
-export const MAX_SIMULATION_SPEED=1000;
+import { FIELD_SIZE, GRID_SIZE, SandField, transportForcing } from './sediment';
+export const MAX_SIMULATION_SPEED=5000;
 export const DETAILED_SPEED_LIMIT=20;
-export function cycleStepLimit(s:SimState){return s.speed<=DETAILED_SPEED_LIMIT?1:Math.min(s.speed/20,50/Math.max(1,transportForcing(s.strength)),s.variableWind?10:50);}
+export function cycleStepLimit(s:SimState){
+ if(s.speed<=DETAILED_SPEED_LIMIT)return 1;
+ const boost=Math.min(2.5,Math.max(1,s.speed/1000));
+ const transportLimit=50*boost*Math.min(1,GRID_SIZE/(s.model?.size??GRID_SIZE));
+ const windLimit=s.variableWind?Math.min(16,10*boost):Infinity;
+ return Math.min(s.speed/20,transportLimit/Math.max(1,transportForcing(s.strength)),windLimit);
+}
 export type SimState={
  cycles:number;pending:number;grainTime:number;playing:boolean;speed:number;strength:number;
  altitude:number;view:string;yaw:number;direction:number;variableWind:boolean;windPhase:number;
@@ -25,4 +31,9 @@ export function advanceSimulation(s:SimState,dt:number){
  }
 
 }
-export function resetSimulation(s:SimState){s.cycles=0;s.pending=0;s.grainTime=0;s.yaw=0;s.windPhase=0;s.model?.reset();}
+export function resetSimulation(s:SimState,resolution=s.model?.size??GRID_SIZE,sandPercent=s.model?.sandPercent??100){
+ if(resolution!==(s.model?.size??GRID_SIZE)||sandPercent!==(s.model?.sandPercent??100)){
+  s.model=new SandField(resolution,FIELD_SIZE/resolution,true,sandPercent);
+ }else s.model?.reset();
+ s.cycles=0;s.pending=0;s.grainTime=0;s.yaw=0;s.windPhase=0;
+}

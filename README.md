@@ -11,11 +11,12 @@ Download [a-sea-of-sand.html](./a-sea-of-sand.html) and open it in a browser wit
 - Drag the landscape or use the left and right arrow keys to turn the camera.
 - Switch between Aerial, Above and Grain journey.
 - Adjust wind strength, direction and viewing height, or enable automatic wind variation.
-- Pause, restart, or change the speed target up to 1,000 model cycles per second. The actual-rate readout shows the achieved speed.
+- Pause, restart, or change the speed target up to 5,000 model cycles per second. Type a target in the cy/s box for precise speeds. The actual-rate readout shows the achieved speed.
+- Under playback, choose a terrain resolution and starting sand amount, then select **Restart with settings** to begin that field at cycle zero.
 
 ## Model and limitations
 
-The terrain stores sand on a 256 × 256 grid with 6 m spacing. Wind transfers sand between cells, sheltered areas promote deposition, and gravity relaxes steep slopes toward a 32° repose criterion. Sand crossing a boundary returns on the opposite side. An empirical calving rule gradually transfers sand from large deposits to smaller ones downwind. The central patch is drawn at its simulated coordinates. The distant panorama combines shifted and rotated samples of that patch.
+The terrain stores sand over a fixed 1,536 m square. Choose 128 × 128 (12 m spacing), 256 × 256 (6 m, the default), or 512 × 512 (3 m). Finer spacing samples the same starting dunes more closely and costs more work per update. Starting sand controls initial volume independently at 50%, 100% or 150% of the usual amount. Wind transfers sand between cells, sheltered areas promote deposition, and gravity relaxes steep slopes toward a 32° repose criterion. Sand crossing a boundary returns on the opposite side. An empirical calving rule gradually transfers sand from large deposits to smaller ones downwind. The central patch is drawn at its simulated coordinates. The distant panorama combines shifted and rotated samples of that patch.
 
 At speeds up to 20 cy/s, the model uses detailed individual cycles. Higher settings use larger, approximate transport steps to fast-forward the landscape. They advance model time and move more sand per update, but do not reproduce every individual detailed cycle. Strong and changing winds use shorter steps. The simulation is a simplified bulk-sediment model, not a calibrated reconstruction of a real desert; model cycles are not calendar years. Fine surface ripples are smaller than the grid and are omitted.
 

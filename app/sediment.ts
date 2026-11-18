@@ -7,6 +7,8 @@
 export const GRID_SIZE=256;
 export const CELL_SIZE=6;
 export const FIELD_SIZE=GRID_SIZE*CELL_SIZE;
+export const GRID_SIZES=[128,256,512];
+export const SAND_PERCENTAGES=[50,100,150];
 export const REPOSE=Math.tan(32*Math.PI/180);
 const SHADOW_SLOPE=Math.tan(15*Math.PI/180);
 const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v));
@@ -19,7 +21,7 @@ type Release = {
  widthRatio:number; erosionDepth:number; remaining:number;
 };
 export class SandField{
- readonly size:number;readonly cell:number;readonly height:Float64Array;
+ readonly size:number;readonly cell:number;readonly height:Float64Array;readonly sandPercent:number;
  private delta:Float64Array;private shelter:Float64Array;
  private neighbors:Uint32Array;
  private releaseClock=0;
@@ -27,8 +29,8 @@ export class SandField{
  private releases:Release[]=[];
  readonly initialHeight:Float64Array;
  version=0;cycles=0;exported=0;initialVolume=0;
- constructor(size=GRID_SIZE,cell=CELL_SIZE,seed=true){
-  this.size=size;this.cell=cell;this.height=new Float64Array(size*size);this.delta=new Float64Array(size*size);this.shelter=new Float64Array(size*size);
+ constructor(size=GRID_SIZE,cell=CELL_SIZE,seed=true,sandPercent=100){
+  this.size=size;this.cell=cell;this.sandPercent=sandPercent;this.height=new Float64Array(size*size);this.delta=new Float64Array(size*size);this.shelter=new Float64Array(size*size);
   // Fixed topology: compute periodic neighbours once, not millions of times
   // during each avalanche solve. The order matches the original solver.
   this.neighbors=new Uint32Array(size*size*4);
@@ -37,10 +39,10 @@ export class SandField{
    this.neighbors[i]=z*size+right;this.neighbors[i+1]=below+x;
    this.neighbors[i+2]=below+right;this.neighbors[i+3]=below+left;
   }
-  if(seed)this.seedDunes();
-  this.relax(80);this.initialHeight=this.height.slice();this.initialVolume=this.volume();
+  if(seed)this.seedDunes(sandPercent/100);
+  this.relax(Math.ceil(80*Math.max(1,(CELL_SIZE/this.cell)**2)));this.initialHeight=this.height.slice();this.initialVolume=this.volume();
  }
- private seedDunes(){
+ private seedDunes(amount:number){
   // Irregular, finite initial sand bodies. Their shapes are starting conditions,
   // never translated as rigid shapes or prescribed during evolution.
   let randomState=3719;
@@ -51,9 +53,9 @@ export class SandField{
    (z+.5+(random()-.5)*.85)*FIELD_SIZE/7-FIELD_SIZE/2,
    23+random()*26,.82+random()*.45
   ]);
-  const domain=this.size*this.cell,scale=domain/FIELD_SIZE;
+  const domain=this.size*this.cell,scale=domain/FIELD_SIZE,duneScale=scale*Math.cbrt(amount);
   for(let j=0;j<seeds.length;j++){
-   const [cx0,cz0,H0,wide]=seeds[j];const cx=cx0*scale,cz=cz0*scale,H=H0*scale;
+   const [cx0,cz0,H0,wide]=seeds[j];const cx=cx0*scale,cz=cz0*scale,H=H0*duneScale;
    const angle=(60+(j%5-2)*5)*Math.PI/180,dx=Math.sin(angle),dz=Math.cos(angle),W=H*3.7*wide;
    for(let z=0;z<this.size;z++)for(let x=0;x<this.size;x++){
     let px=(x+.5)*this.cell-domain/2-cx,pz=(z+.5)*this.cell-domain/2-cz;
@@ -66,7 +68,7 @@ export class SandField{
     if(u<0&&u>-up){const f=1+u/up;h=crown*(.4*f+.6*f*f);}
     else if(u>=0&&u<down)h=crown*(1-u/down);
     // Round only the immediate crest and taper toes into the bare plain.
-    h=Math.max(0,h-.45*scale);
+    h=Math.max(0,h-.45*duneScale);
     const i=z*this.size+x;this.height[i]+=h;
    }
   }
@@ -168,7 +170,7 @@ export class SandField{
   if(transport<=0)return;
   const theta=direction*Math.PI/180,dx=Math.sin(theta),dz=Math.cos(theta),n=this.size;
   this.windShadow(dx,dz);this.delta.fill(0);
-  const h=this.height,sh=this.shelter,hop=2.5;
+  const h=this.height,sh=this.shelter,hop=15/this.cell;
   for(let z=0;z<n;z++)for(let x=0;x<n;x++){
    const i=z*n+x;if(h[i]<=0||sh[i]>h[i]+.08)continue;
    const up=this.sample(h,x-dx,z-dz),down=this.sample(h,x+dx,z+dz);
@@ -189,8 +191,9 @@ export class SandField{
   // Conservative slope-driven surface creep, followed by repose-limited slides.
   const base=Math.min(.018,.006*transport);
   this.shedFlanks(transport*cycles,dx,dz);
-  this.creep(cycles===1?base:(1-Math.pow(1-4*base,cycles))/4);
-  this.relax(cycles===1?48:192);this.version++;
+  const diffusionTime=cycles*(CELL_SIZE/this.cell)**2;
+  this.creep(diffusionTime===1?base:(1-Math.pow(1-4*base,diffusionTime))/4);
+  this.relax(Math.ceil((cycles===1?48:192)*Math.max(1,(CELL_SIZE/this.cell)**2)));this.version++;
  }
  private creep(k:number){
   const n=this.size,h=this.height;
@@ -204,17 +207,41 @@ export class SandField{
   for(let i=0;i<h.length;i++)h[i]+=this.delta[i];
  }
  relax(maxPasses=32){
-  const h=this.height,limit=this.cell*REPOSE,diagonal=limit*Math.SQRT2,neighbors=this.neighbors,count=h.length;
+  const h=this.height,n=this.size,limit=this.cell*REPOSE,diagonal=limit*Math.SQRT2;
+  // Fine grids need more sweeps. Revisit only blocks near a transfer in the previous sweep.
+  const span=n>GRID_SIZE?8:n,blocks=Math.ceil(n/span),count=blocks*blocks;
+  let active=new Uint8Array(count).fill(1),next=new Uint8Array(count);
   for(let pass=0;pass<maxPasses;pass++){
    let worst=0;
-   const reverse=pass%2;
+   const reverse=pass%2===1;
+   next.fill(0);
    for(let at=0;at<count;at++){
-    const i=reverse?count-1-at:at,base=i*4;
-    for(let k=0;k<4;k++){const j=neighbors[base+k],d=h[i]-h[j],excess=Math.abs(d)-(k<2?limit:diagonal);if(excess<=.002)continue;
-     worst=Math.max(worst,excess);const source=d>0?i:j,dest=d>0?j:i,move=Math.min(h[source],excess*.5);h[source]-=move;h[dest]+=move;
+    const block=reverse?count-1-at:at;
+    if(!active[block])continue;
+    const bx=block%blocks,bz=Math.floor(block/blocks),x0=bx*span,z0=bz*span;
+    const x1=Math.min(x0+span,n),z1=Math.min(z0+span,n);
+    let blockWorst=0;
+    for(let row=z0;row<z1;row++){
+     const z=reverse?z1-1-(row-z0):row,offset=z*n;
+     for(let col=x0;col<x1;col++){
+      const i=offset+(reverse?x1-1-(col-x0):col);
+      for(let k=0;k<4;k++){
+       const j=this.neighbors[i*4+k],d=h[i]-h[j],excess=Math.abs(d)-(k<2?limit:diagonal);
+       if(excess<=.002)continue;
+       blockWorst=Math.max(blockWorst,excess);
+       const source=d>0?i:j,dest=d>0?j:i,move=Math.min(h[source],excess*(count===1?.5:.85));
+       h[source]-=move;h[dest]+=move;
+      }
+     }
+    }
+    if(blockWorst===0)continue;
+    worst=Math.max(worst,blockWorst);
+    for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++){
+     next[((bz+dz+blocks)%blocks)*blocks+(bx+dx+blocks)%blocks]=1;
     }
    }
    if(worst<.005)break;
+   [active,next]=[next,active];
   }
  }
  /** Pack metres into two colour channels. Linear texture interpolation remains

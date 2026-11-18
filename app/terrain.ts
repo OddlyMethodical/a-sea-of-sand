@@ -1,11 +1,12 @@
 import type { SimState } from './wind';
-import { SandField, FIELD_SIZE, GRID_SIZE } from './sediment';
+import { SandField, FIELD_SIZE } from './sediment';
 export const vertexShader=`attribute vec2 position;void main(){gl_Position=vec4(position,0.,1.);}`;
 export const fragmentShader=`
 precision highp float;
 uniform vec2 resolution;
 uniform sampler2D sandMap;
 uniform float fieldSize;
+uniform float cellSize;
 uniform float maxHeight;
 uniform float altitude;
 uniform float yaw;
@@ -67,7 +68,7 @@ void main(){
   // At the far clipping distance, merge unresolved dunes into atmospheric haze.
   if(hit<.5){t=ro.y/-rd.y;p=ro+rd*t;hit=1.;}
   if(hit>.5){
-   float e=max(5.,t*.0007),h=heightAt(p.xz);
+   float e=max(cellSize*5./6.,t*.0007),h=heightAt(p.xz);
    vec3 n=normalize(vec3(heightAt(p.xz-vec2(e,0))-heightAt(p.xz+vec2(e,0)),2.*e,heightAt(p.xz-vec2(0,e))-heightAt(p.xz+vec2(0,e))));
    vec3 sun=normalize(vec3(-.68,.5,-.53));float shade=shadow(p+n*.8,sun);
    float light=max(0.,dot(n,sun));
@@ -86,10 +87,10 @@ export function createTerrain(canvas:HTMLCanvasElement,state:SimState,onError:(m
  let program:WebGLProgram,vs:WebGLShader,fs:WebGLShader;
  try{vs=compile(gl.VERTEX_SHADER,vertexShader);fs=compile(gl.FRAGMENT_SHADER,fragmentShader);program=gl.createProgram()!;gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error('Terrain shader link failed');}catch(e){onError('The 3D view could not start. Grain journey is still available.');console.error(e);return()=>{};}
  gl.useProgram(program);const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);const pos=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(pos);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);
- const uniforms=Object.fromEntries(['resolution','sandMap','fieldSize','maxHeight','altitude','yaw','overhead'].map(k=>[k,gl.getUniformLocation(program,k)]));
+ const uniforms=Object.fromEntries(['resolution','sandMap','fieldSize','cellSize','maxHeight','altitude','yaw','overhead'].map(k=>[k,gl.getUniformLocation(program,k)]));
  const texture=gl.createTexture();gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
  gl.uniform1i(uniforms.sandMap,0);gl.uniform1f(uniforms.fieldSize,FIELD_SIZE);
- const packed=new Uint8Array(GRID_SIZE*GRID_SIZE*4);let packedVersion=-1;
+ let packed=new Uint8Array(0),packedVersion=-1,packedModel:SandField|null=null;
  let frame=0,previous=0,top=0,alt=state.altitude,drawnYaw=NaN,invalidated=true;
  // Keep the original full-detail resolution. An unchanged landscape needs no
  // new GPU work; camera movement still renders on every animation frame.
@@ -103,8 +104,17 @@ export function createTerrain(canvas:HTMLCanvasElement,state:SimState,onError:(m
   const oldTop=top,oldAlt=alt,targetTop=Number(state.view==='above');
   top+=(targetTop-top)*Math.min(1,dt*4);alt+=(state.altitude-alt)*Math.min(1,dt*4);
   if(Math.abs(targetTop-top)<.0001)top=targetTop;if(Math.abs(state.altitude-alt)<.01)alt=state.altitude;
-  if(!invalidated&&model.version===packedVersion&&state.yaw===drawnYaw&&top===oldTop&&alt===oldAlt)return;
-  if(model.version!==packedVersion){model.pack(packed);if(packedVersion<0)gl!.texImage2D(gl!.TEXTURE_2D,0,gl!.RGBA,GRID_SIZE,GRID_SIZE,0,gl!.RGBA,gl!.UNSIGNED_BYTE,packed);else gl!.texSubImage2D(gl!.TEXTURE_2D,0,0,0,GRID_SIZE,GRID_SIZE,gl!.RGBA,gl!.UNSIGNED_BYTE,packed);gl!.uniform1f(uniforms.maxHeight,model.stats().maxHeight);packedVersion=model.version;}
+  const fieldChanged=model!==packedModel||model.version!==packedVersion;
+  if(!invalidated&&!fieldChanged&&state.yaw===drawnYaw&&top===oldTop&&alt===oldAlt)return;
+  if(fieldChanged){
+   const size=model.size,resizeTexture=packed.length!==size*size*4;
+   if(resizeTexture)packed=new Uint8Array(size*size*4);
+   model.pack(packed);
+   if(resizeTexture)gl!.texImage2D(gl!.TEXTURE_2D,0,gl!.RGBA,size,size,0,gl!.RGBA,gl!.UNSIGNED_BYTE,packed);
+   else gl!.texSubImage2D(gl!.TEXTURE_2D,0,0,0,size,size,gl!.RGBA,gl!.UNSIGNED_BYTE,packed);
+   gl!.uniform1f(uniforms.cellSize,model.cell);gl!.uniform1f(uniforms.maxHeight,model.stats().maxHeight);
+   packedModel=model;packedVersion=model.version;
+  }
   gl!.uniform2f(uniforms.resolution,canvas.width,canvas.height);gl!.uniform1f(uniforms.altitude,alt);gl!.uniform1f(uniforms.yaw,state.yaw);gl!.uniform1f(uniforms.overhead,top);gl!.drawArrays(gl!.TRIANGLES,0,6);drawnYaw=state.yaw;invalidated=false;
  }
  frame=requestAnimationFrame(draw);
